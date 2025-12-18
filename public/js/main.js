@@ -1,473 +1,453 @@
-// ========== CONFIGURATION ==========
-const API_BASE_URL = window.location.origin;
-const PRODUCTS_ENDPOINT = `${API_BASE_URL}/api/products`;
+// State Management
+let isDarkMode = false;
+let currency = 'KES'; // Default currency for Kenya
+let productsData = [];
 
-// ========== STATE ==========
-let cart = JSON.parse(localStorage.getItem('cart')) || [];
-let products = [];
+// DOM Elements
+const darkModeToggle = document.getElementById('darkModeToggle');
+const currencyToggle = document.getElementById('currencyToggle');
+const currencyText = document.getElementById('currencyText');
+const hotProductsGrid = document.getElementById('hotProducts');
+const electronicsGrid = document.getElementById('electronics');
+const fashionGrid = document.getElementById('fashion');
+const homeGrid = document.getElementById('home');
+const ctaButton = document.querySelector('.cta-button');
+const subscribeBtn = document.getElementById('subscribeBtn');
+const newsletterEmail = document.getElementById('newsletterEmail');
 
-// ========== DOM ELEMENTS ==========
-const productsContainer = document.getElementById('products-container');
-const loadingElement = document.getElementById('loading');
-const errorElement = document.getElementById('error-message');
-const errorText = document.getElementById('error-text');
-const cartCountElement = document.getElementById('cart-count');
-
-// ========== INITIALIZATION ==========
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Discount Marketplace Frontend Loaded');
-    console.log('API Base URL:', API_BASE_URL);
-    
-    updateCartCount();
-    loadProducts();
-    
-    // Test API connection
-    testAPI();
-});
-
-// ========== API FUNCTIONS ==========
-
-// Test API connection
-async function testAPI() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/health`);
-        const data = await response.json();
-        console.log('✅ API Health:', data);
-    } catch (error) {
-        console.warn('⚠️ API health check failed:', error.message);
+// Format currency for display
+function formatCurrency(amount, currencyType) {
+    if (currencyType === 'KES') {
+        return `KSh ${amount.toLocaleString('en-KE')}`;
+    } else {
+        // Convert KES to USD (approximate rate: 1 USD = 130 KES)
+        const usdAmount = amount / 130;
+        return `$${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
+}
+
+// Calculate discounted price
+function calculateDiscountedPrice(originalPrice, discount) {
+    return originalPrice * (1 - discount / 100);
+}
+
+// Create product card HTML
+function createProductCard(product) {
+    const discountedPrice = calculateDiscountedPrice(product.original_price, product.discount_percentage);
+    const originalPriceDisplay = formatCurrency(product.original_price, currency);
+    const discountedPriceDisplay = formatCurrency(discountedPrice, currency);
+    
+    return `
+        <div class="product-card" data-id="${product.product_id}">
+            <div class="product-img" style="background-image: url('${product.image_url}')"></div>
+            <div class="product-info">
+                <h3 class="product-title">${product.title}</h3>
+                <p class="product-desc">${product.description}</p>
+                <div class="rating">
+                    ${'★'.repeat(Math.floor(product.rating))}${'☆'.repeat(5-Math.floor(product.rating))}
+                    <span style="color: var(--text-light); font-size: 0.8rem; margin-left: 5px;">${product.rating}</span>
+                </div>
+                <div class="price">
+                    <span class="old-price">${originalPriceDisplay}</span>
+                    <span class="new-price">${discountedPriceDisplay}</span>
+                    <span class="discount-badge">${product.discount_percentage}% OFF</span>
+                </div>
+                <button class="add-to-cart" data-id="${product.product_id}">
+                    <i class="fas fa-cart-plus"></i> Add to Cart
+                </button>
+            </div>
+        </div>
+    `;
 }
 
 // Load products from API
 async function loadProducts() {
-    showLoading(true);
-    hideError();
-    
     try {
-        console.log('📡 Fetching products from:', PRODUCTS_ENDPOINT);
+        const response = await fetch('/api/products');
+        productsData = await response.json();
         
-        const response = await fetch(PRODUCTS_ENDPOINT);
+        // Categorize products
+        const electronics = productsData.filter(p => p.category === 'Electronics');
+        const fashion = productsData.filter(p => p.category === 'Fashion');
+        const home = productsData.filter(p => p.category === 'Home');
         
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+        // Get top 4 from each category for hot products
+        const hotProducts = [...electronics.slice(0, 2), ...fashion.slice(0, 1), ...home.slice(0, 1)];
         
-        const data = await response.json();
-        console.log(`✅ Received ${data.length} products`);
-        
-        products = Array.isArray(data) ? data : [];
-        displayProducts(products);
+        // Render products
+        renderProducts(hotProducts, hotProductsGrid);
+        renderProducts(electronics, electronicsGrid);
+        renderProducts(fashion, fashionGrid);
+        renderProducts(home, homeGrid);
         
     } catch (error) {
-        console.error('❌ Error loading products:', error);
-        showError(`Failed to load products: ${error.message}`);
-        
-        // Fallback: Show sample products
-        displaySampleProducts();
-    } finally {
-        showLoading(false);
+        console.error('Failed to load products from API:', error);
+        // Fallback to static demo data
+        loadDemoProducts();
     }
 }
 
-// ========== DISPLAY FUNCTIONS ==========
-
-// Display products in grid
-function displayProducts(productsList) {
-    if (!productsList || productsList.length === 0) {
-        productsContainer.innerHTML = `
-            <div class="no-products">
-                <i class="fas fa-box-open fa-3x"></i>
-                <h3>No Products Available</h3>
-                <p>Check back soon for new deals!</p>
-            </div>
-        `;
-        return;
-    }
-    
-    productsContainer.innerHTML = '';
-    
-    productsList.forEach((product, index) => {
-        const productCard = createProductCard(product, index);
-        productsContainer.appendChild(productCard);
-    });
-}
-
-// Create product card HTML
-function createProductCard(product, index) {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-    card.setAttribute('data-index', index);
-    
-    // Calculate values
-    const stock = parseInt(product.stock) || 0;
-    const discount = calculateDiscount(product.original_price, product.discounted_price);
-    const icon = getCategoryIcon(product.category);
-    const stockStatus = getStockStatus(stock);
-    
-    card.innerHTML = `
-        <div class="product-image">
-            <i class="fas fa-${icon}"></i>
-        </div>
-        
-        <div class="product-content">
-            <h3 class="product-title">${escapeHtml(product.title || 'Untitled Product')}</h3>
-            
-            <p class="product-description">
-                ${escapeHtml(product.description || 'No description available')}
-            </p>
-            
-            <div class="product-meta">
-                <span class="product-category">${escapeHtml(product.category || 'General')}</span>
-                <span class="product-stock ${stockStatus.class}">
-                    ${stockStatus.text}
-                </span>
-            </div>
-            
-            <div class="product-price">
-                <span class="original-price">KES ${formatPrice(product.original_price)}</span>
-                <span class="discounted-price">KES ${formatPrice(product.discounted_price)}</span>
-                <span class="discount-badge">${discount}% OFF</span>
-            </div>
-            
-            <button class="btn-add-cart" 
-                    onclick="addToCart(${index})"
-                    ${stock === 0 ? 'disabled' : ''}
-                    title="${stock === 0 ? 'Out of stock' : 'Add to cart'}">
-                <i class="fas fa-cart-plus"></i>
-                ${stock === 0 ? 'Out of Stock' : 'Add to Cart'}
-            </button>
-        </div>
-    `;
-    
-    return card;
-}
-
-// Display sample products (fallback)
-function displaySampleProducts() {
-    const sampleProducts = [
+// Load demo products (fallback)
+function loadDemoProducts() {
+    const demoProducts = [
         {
-            title: 'Sample Smartphone',
-            description: 'High-quality smartphone with great features',
+            product_id: 'elec_001',
+            title: 'iPhone 15 Pro Max',
+            description: '6.7" Super Retina XDR, A17 Pro chip, 48MP camera',
             category: 'Electronics',
-            original_price: 20000,
-            discounted_price: 16000,
-            stock: 10,
-            discount_percentage: 20
+            original_price: 159999,
+            discount_percentage: 13,
+            image_url: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=300&h=200&fit=crop',
+            rating: 4.8
         },
         {
-            title: 'Sample Shoes',
-            description: 'Comfortable shoes for daily use',
+            product_id: 'elec_002',
+            title: 'Samsung Galaxy S24 Ultra',
+            description: '200MP camera, S Pen included, Snapdragon 8 Gen 3',
+            category: 'Electronics',
+            original_price: 149999,
+            discount_percentage: 17,
+            image_url: 'https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?w=300&h=200&fit=crop',
+            rating: 4.7
+        },
+        {
+            product_id: 'fash_001',
+            title: "Men's Leather Jacket",
+            description: 'Genuine leather, classic design, multiple colors',
             category: 'Fashion',
-            original_price: 3000,
-            discounted_price: 2100,
-            stock: 5,
-            discount_percentage: 30
+            original_price: 14999,
+            discount_percentage: 33,
+            image_url: 'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300&h=200&fit=crop',
+            rating: 4.5
+        },
+        {
+            product_id: 'home_001',
+            title: 'Air Fryer 5.5L',
+            description: 'Digital display, 8 presets, 1700W, non-stick basket',
+            category: 'Home',
+            original_price: 14999,
+            discount_percentage: 33,
+            image_url: 'https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=300&h=200&fit=crop',
+            rating: 4.8
         }
     ];
     
-    displayProducts(sampleProducts);
+    renderProducts(demoProducts, hotProductsGrid);
+    renderProducts(demoProducts.filter(p => p.category === 'Electronics'), electronicsGrid);
+    renderProducts(demoProducts.filter(p => p.category === 'Fashion'), fashionGrid);
+    renderProducts(demoProducts.filter(p => p.category === 'Home'), homeGrid);
 }
 
-// ========== CART FUNCTIONS ==========
+// Render products to a grid
+function renderProducts(products, container) {
+    if (!container) return;
+    
+    container.innerHTML = '';
+    products.forEach(product => {
+        container.innerHTML += createProductCard(product);
+    });
+    
+    // Add event listeners to new cart buttons
+    container.querySelectorAll('.add-to-cart').forEach(button => {
+        button.addEventListener('click', function() {
+            const productId = this.getAttribute('data-id');
+            const product = products.find(p => p.product_id === productId);
+            addToCart(product);
+        });
+    });
+}
 
-// Add product to cart
-function addToCart(productIndex) {
-    const product = products[productIndex];
+// Add to cart functionality
+function addToCart(product) {
+    // Get existing cart or create new one
+    let cart = JSON.parse(localStorage.getItem('cart')) || [];
     
-    if (!product) {
-        showNotification('Product not found!', 'error');
-        return;
-    }
-    
-    const stock = parseInt(product.stock) || 0;
-    if (stock === 0) {
-        showNotification('This product is out of stock!', 'error');
-        return;
-    }
-    
-    // Find existing item in cart
-    const existingItem = cart.find(item => item.id === product.product_id);
+    // Check if product already in cart
+    const existingItem = cart.find(item => item.product_id === product.product_id);
     
     if (existingItem) {
-        if (existingItem.quantity >= stock) {
-            showNotification(`Only ${stock} items available!`, 'error');
-            return;
-        }
         existingItem.quantity += 1;
     } else {
         cart.push({
-            id: product.product_id || `prod_${Date.now()}`,
-            name: product.title,
-            price: product.discounted_price,
-            quantity: 1,
-            maxStock: stock
+            ...product,
+            quantity: 1
         });
     }
     
+    // Save back to localStorage
+    localStorage.setItem('cart', JSON.stringify(cart));
+    
+    // Show notification
+    showNotification(`Added ${product.title} to cart!`);
+    
+    // Update cart icon (if implemented)
     updateCartCount();
-    saveCartToStorage();
-    
-    // Show success notification
-    showNotification(`"${product.title}" added to cart!`, 'success');
-    
-    // Animate cart icon
-    animateCartIcon();
 }
-
-// Update cart count display
-function updateCartCount() {
-    const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
-    cartCountElement.textContent = totalItems;
-    cartCountElement.style.display = totalItems > 0 ? 'flex' : 'none';
-}
-
-// Save cart to localStorage
-function saveCartToStorage() {
-    try {
-        localStorage.setItem('cart', JSON.stringify(cart));
-    } catch (error) {
-        console.error('Failed to save cart:', error);
-    }
-}
-
-// ========== UI HELPER FUNCTIONS ==========
-
-// Show loading state
-function showLoading(show) {
-    if (show) {
-        loadingElement.style.display = 'block';
-        productsContainer.style.display = 'none';
-    } else {
-        loadingElement.style.display = 'none';
-        productsContainer.style.display = 'grid';
-    }
-}
-
-// Show error message
-function showError(message) {
-    errorText.textContent = message;
-    errorElement.style.display = 'flex';
-}
-
-// Hide error message
-function hideError() {
-    errorElement.style.display = 'none';
-}
-
-// Error handling wrapper
-function withErrorHandling(fn) {
-    return async function(...args) {
-        try {
-            return await fn(...args);
-        } catch (error) {
-            console.error('Error:', error);
-            showNotification('Something went wrong. Please try again.', 'error');
-            return null;
-        }
-    };
-}
-
-// Use it like this:
-const safeLoadProducts = withErrorHandling(loadProducts);
 
 // Show notification
-function showNotification(message, type = 'success') {
-    // Remove existing notifications
-    document.querySelectorAll('.notification').forEach(el => el.remove());
-    
-    // Create new notification
+function showNotification(message) {
+    // Create notification element
     const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-        <span>${escapeHtml(message)}</span>
+    notification.className = 'notification';
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: var(--primary);
+        color: white;
+        padding: 15px 25px;
+        border-radius: 10px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
     `;
-    
-    // Style the notification
-    Object.assign(notification.style, {
-        position: 'fixed',
-        top: '20px',
-        right: '20px',
-        background: type === 'success' ? '#10b981' : '#ef4444',
-        color: 'white',
-        padding: '1rem 1.5rem',
-        borderRadius: '8px',
-        zIndex: '10000',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-        animation: 'slideIn 0.3s ease'
-    });
     
     document.body.appendChild(notification);
     
     // Remove after 3 seconds
     setTimeout(() => {
         notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
+        setTimeout(() => {
+            document.body.removeChild(notification);
+        }, 300);
     }, 3000);
 }
 
-// Animate cart icon
-function animateCartIcon() {
-    cartCountElement.style.transform = 'scale(1.3)';
-    setTimeout(() => {
-        cartCountElement.style.transform = 'scale(1)';
-    }, 300);
-}
-
-// Scroll to products section
-function scrollToProducts() {
-    document.getElementById('products').scrollIntoView({ 
-        behavior: 'smooth' 
-    });
-}
-
-// Add search functionality
-function addSearch() {
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = 'Search products...';
-    searchInput.id = 'searchInput';
+// Update cart count in header
+function updateCartCount() {
+    const cart = JSON.parse(localStorage.getItem('cart')) || [];
+    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
     
-    // Add to your page
-    document.querySelector('.container').prepend(searchInput);
+    // Find or create cart count badge
+    let cartBadge = document.querySelector('.cart-badge');
+    const cartIcon = document.querySelector('.fa-shopping-cart').parentElement;
     
-    searchInput.addEventListener('input', function(e) {
-        const searchTerm = e.target.value.toLowerCase();
-        const filtered = products.filter(p => 
-            p.title.toLowerCase().includes(searchTerm) || 
-            p.description.toLowerCase().includes(searchTerm)
-        );
-        displayProducts(filtered);
-    });
-}
-
-function addCategoryFilter() {
-    const categories = ['All', 'Electronics', 'Fashion', 'Home', 'Sports'];
-    const filterDiv = document.createElement('div');
-    filterDiv.className = 'category-filter';
+    if (!cartBadge && totalItems > 0) {
+        cartBadge = document.createElement('span');
+        cartBadge.className = 'cart-badge';
+        cartBadge.style.cssText = `
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: #ff2a00;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        cartIcon.style.position = 'relative';
+        cartIcon.appendChild(cartBadge);
+    }
     
-    categories.forEach(category => {
-        const btn = document.createElement('button');
-        btn.textContent = category;
-        btn.onclick = () => filterByCategory(category);
-        filterDiv.appendChild(btn);
-    });
-    
-    document.querySelector('.container').appendChild(filterDiv);
-}
-
-function filterByCategory(category) {
-    if (category === 'All') {
-        displayProducts(products);
-    } else {
-        const filtered = products.filter(p => p.category === category);
-        displayProducts(filtered);
+    if (cartBadge) {
+        cartBadge.textContent = totalItems;
+        if (totalItems === 0) {
+            cartBadge.remove();
+        }
     }
 }
 
-// ========== UTILITY FUNCTIONS ==========
+// Toggle Dark Mode
+darkModeToggle.addEventListener('click', function() {
+    isDarkMode = !isDarkMode;
+    document.body.classList.toggle('dark-mode', isDarkMode);
+    this.innerHTML = isDarkMode ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+    
+    // Save preference to localStorage
+    localStorage.setItem('darkMode', isDarkMode);
+});
 
-// Calculate discount percentage
-function calculateDiscount(original, discounted) {
-    if (!original || !discounted) return 0;
-    const discount = ((original - discounted) / original) * 100;
-    return Math.round(discount);
+// Toggle Currency
+currencyToggle.addEventListener('click', function() {
+    currency = currency === 'KES' ? 'USD' : 'KES';
+    currencyText.textContent = currency;
+    
+    // Save preference to localStorage
+    localStorage.setItem('currency', currency);
+    
+    // Reload products to update prices
+    loadProducts();
+});
+
+// Timer for flash sale
+function updateTimer() {
+    const hoursEl = document.getElementById('hours');
+    const minutesEl = document.getElementById('minutes');
+    const secondsEl = document.getElementById('seconds');
+    
+    let time = 12 * 3600 + 45 * 60 + 30; // 12:45:30 in seconds
+    
+    setInterval(() => {
+        time--;
+        const h = Math.floor(time / 3600);
+        const m = Math.floor((time % 3600) / 60);
+        const s = time % 60;
+        
+        if (hoursEl) hoursEl.textContent = h.toString().padStart(2, '0');
+        if (minutesEl) minutesEl.textContent = m.toString().padStart(2, '0');
+        if (secondsEl) secondsEl.textContent = s.toString().padStart(2, '0');
+        
+        if (time <= 0) {
+            time = 24 * 3600; // Reset to 24 hours
+        }
+    }, 1000);
 }
 
-// Format price with commas
-function formatPrice(price) {
-    if (!price) return '0.00';
-    const num = parseFloat(price);
-    return num.toLocaleString('en-KE', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+// Initialize app
+function init() {
+    // Load saved preferences
+    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+    const savedCurrency = localStorage.getItem('currency') || 'KES';
+    
+    // Apply saved preferences
+    if (savedDarkMode) {
+        isDarkMode = true;
+        document.body.classList.add('dark-mode');
+        darkModeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+    }
+    
+    if (savedCurrency) {
+        currency = savedCurrency;
+        currencyText.textContent = currency;
+    }
+    
+    // Load products
+    loadProducts();
+    
+    // Start timer
+    updateTimer();
+    
+    // Update cart count
+    updateCartCount();
+    
+    // Setup event listeners
+    setupEventListeners();
+}
+
+// Setup event listeners
+function setupEventListeners() {
+    // Hero CTA button
+    ctaButton.addEventListener('click', () => {
+        showNotification('Browse our amazing deals below!');
+        document.querySelector('.products').scrollIntoView({ behavior: 'smooth' });
+    });
+    
+    // Newsletter subscription
+    subscribeBtn.addEventListener('click', () => {
+        const email = newsletterEmail.value;
+        if (email && email.includes('@')) {
+            showNotification(`Thank you for subscribing with ${email}!`);
+            newsletterEmail.value = '';
+        } else {
+            showNotification('Please enter a valid email address.');
+        }
+    });
+    
+    // Category cards
+    document.querySelectorAll('.category-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const categoryName = this.querySelector('h3').textContent;
+            showNotification(`Showing ${categoryName} products...`);
+            
+            // Scroll to corresponding section
+            const sectionId = categoryName.toLowerCase().replace(/[^a-z]/g, '');
+            const section = document.querySelector(`.product-section:nth-child(${getCategoryIndex(categoryName) + 1})`);
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    });
+    
+    // Search functionality
+    const searchInput = document.querySelector('.search-bar input');
+    const searchButton = document.querySelector('.search-bar button');
+    
+    searchButton.addEventListener('click', performSearch);
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') performSearch();
     });
 }
 
-// Get category icon
-function getCategoryIcon(category) {
-    if (!category) return 'box';
-    
-    const icons = {
-        'electronics': 'laptop',
-        'fashion': 'tshirt',
-        'clothing': 'tshirt',
-        'home': 'home',
-        'kitchen': 'utensils',
-        'sports': 'futbol',
-        'books': 'book',
-        'automotive': 'car',
-        'health': 'heart',
-        'beauty': 'spa'
+// Get category index for scrolling
+function getCategoryIndex(categoryName) {
+    const categories = {
+        'Phones & Tablets': 0,
+        'Computers': 0,
+        'Fashion': 1,
+        'Home & Kitchen': 2,
+        'Gaming': 0,
+        'Electronics': 0,
+        'Health & Beauty': 0,
+        'Automotive': 0
     };
-    
-    const lowerCategory = category.toLowerCase();
-    for (const [key, icon] of Object.entries(icons)) {
-        if (lowerCategory.includes(key)) {
-            return icon;
-        }
-    }
-    
-    return 'box';
+    return categories[categoryName] || 0;
 }
 
-// Get stock status
-function getStockStatus(stock) {
-    if (stock === 0) {
-        return { class: 'out', text: 'Out of stock' };
-    } else if (stock < 5) {
-        return { class: 'low', text: `Low stock (${stock})` };
-    } else {
-        return { class: '', text: `In stock (${stock})` };
+// Perform search
+function performSearch() {
+    const searchInput = document.querySelector('.search-bar input');
+    const query = searchInput.value.trim().toLowerCase();
+    
+    if (query) {
+        showNotification(`Searching for: ${query}`);
+        // In a real app, you would make an API call here
+        // For now, just highlight matching products
+        highlightMatchingProducts(query);
     }
 }
 
-// Escape HTML to prevent XSS
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// Highlight products matching search
+function highlightMatchingProducts(query) {
+    document.querySelectorAll('.product-card').forEach(card => {
+        const title = card.querySelector('.product-title').textContent.toLowerCase();
+        const desc = card.querySelector('.product-desc').textContent.toLowerCase();
+        
+        if (title.includes(query) || desc.includes(query)) {
+            card.style.boxShadow = '0 0 0 3px var(--primary)';
+            card.style.transform = 'scale(1.02)';
+            
+            // Scroll to first matching product
+            setTimeout(() => {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        } else {
+            card.style.boxShadow = '';
+            card.style.transform = '';
+        }
+    });
 }
 
-// ========== ADD CSS ANIMATIONS ==========
-function addAnimations() {
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+// Add CSS animations for notifications
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
         }
-        
-        @keyframes slideOut {
-            from { transform: translateX(0); opacity: 1; }
-            to { transform: translateX(100%); opacity: 0; }
+        to {
+            transform: translateX(0);
+            opacity: 1;
         }
-        
-        .no-products {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 3rem;
-            color: #64748b;
+    }
+    
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
         }
-        
-        .no-products i {
-            margin-bottom: 1rem;
-            color: #cbd5e1;
+        to {
+            transform: translateX(100%);
+            opacity: 0;
         }
-        
-        .notification {
-            animation: slideIn 0.3s ease;
-        }
-        
-        .notification-slide-out {
-            animation: slideOut 0.3s ease;
-        }
-    `;
-    document.head.appendChild(style);
-}
+    }
+`;
+document.head.appendChild(style);
 
-// Initialize animations
-addAnimations();
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', init);
